@@ -2,33 +2,26 @@ from tqdm import tqdm
 import json
 import gensim
 import fire
-
-
+from utils import topic_tokenizer
 
 def cal_topic_number(work_dir, jsonl_input_file, jsonl_output_file, lang):
 
-    dictionary = gensim.corpora.Dictionary()
-    dictionary.load_from_text(f"{work_dir}/dictionary.filtered.txt")
-    # dictionary.filter_extremes(no_below=3, no_above=0.3)
-    topics_number = []
+    tokenizer = topic_tokenizer.Tokenizer(lang)
+    dictionary = gensim.corpora.Dictionary.load_from_text(f"{work_dir}/dictionary.filtered.txt")
     lda_model = gensim.models.ldamodel.LdaModel.load(f"{work_dir}/lda_100k.model")
+
+    # total = 1e7 if lang == "en" else 1e6
 
     with open(jsonl_output_file, "w") as fw:
         with open(jsonl_input_file, "r") as f:
-            for line in tqdm(f):
+            for line in tqdm(f, total=1e7):
                 data = json.loads(line)
-                if lang == "jp":
-                    text = data["nouns"]
-                elif lang == "en":
-                    text = data["text"].lower().split()
-                else:
-                    raise ValueError("lang must be 'jp' or 'en'")
+                text = tokenizer(data["text"])
 
                 corpus = dictionary.doc2bow(text)
-                topics_per_document = lda_model[corpus][0]
+                topics_per_document = lda_model[corpus]
                 topic_number = 0
                 max_score = 0.0
-                import ipdb; ipdb.set_trace()
                 for topics in topics_per_document:
                     if max_score < topics[1]:
                         topic_number = topics[0]
