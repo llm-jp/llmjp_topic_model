@@ -1,0 +1,7 @@
+sudachidict_core
+matplotlib
+scipy==1.10.1
+pypi-kenlm
+numpy==1.26.4
+datasets
+tqdm
