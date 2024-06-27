@@ -7,14 +7,15 @@ from utils import topic_tokenizer
 def cal_topic_number(work_dir, jsonl_input_file, jsonl_output_file, lang):
 
     tokenizer = topic_tokenizer.Tokenizer(lang)
-    dictionary = gensim.corpora.Dictionary.load_from_text(f"{work_dir}/dictionary.filtered.txt")
+    # dictionary = gensim.corpora.Dictionary.load_from_text(f"{work_dir}/dictionary.filtered.txt")
+    dictionary = gensim.corpora.Dictionary.load(f"{work_dir}/dictionary.filtered.pkl")
     lda_model = gensim.models.ldamodel.LdaModel.load(f"{work_dir}/lda_100k.model")
 
-    # total = 1e7 if lang == "en" else 1e6
+    total = 1e7 if lang == "en" else 1e6
 
     with open(jsonl_output_file, "w") as fw:
         with open(jsonl_input_file, "r") as f:
-            for line in tqdm(f, total=1e7):
+            for line in tqdm(f, total=total):
                 data = json.loads(line)
                 text = tokenizer(data["text"])
 
