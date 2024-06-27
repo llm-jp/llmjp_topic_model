@@ -10,7 +10,7 @@ import pyLDAvis.gensim
 #from wordcloud import WordCloud
 import matplotlib.pylab as plt
 import os, sys
-from sudachipy import Dictionary, SplitMode
+import sudachipy
 import kenlm
 from datasets import load_dataset
 import glob
@@ -29,50 +29,10 @@ num = re.compile('[0-9]+')
 symbol = re.compile('[!"#$%&\'\\\\()*+,-./:;<=>?@[\\]^_`{|}~「」〔〕“”〈〉『』【】＆＊・（）＄＃＠。、？！｀＋￥％]')
 alpha = p = re.compile('[a-z]|[A-Z]')
 # dict = Dictionary()
-tokenizer = Dictionary().create(mode=SplitMode.C)
+sudachi_tokenizer = sudachipy.Dictionary().create(mode=sudachipy.SplitMode.C)
 
-# 名詞を抽出, 分かち書き
-def analyzer(text):
-  words = []
-  wakati_text = []
-  for t in text.split("\n"):
-    for s in t.split("。"):
-      ms = tokenizer.tokenize(s)
-      for m in ms:
-        word = m.surface()
-        wakati_text.append(word)
-        if m.part_of_speech()[0] == "名詞":
-          if num.fullmatch(word):
-            words.append("0")
-          elif symbol.fullmatch(word) or alpha.fullmatch(word):
-            pass
-          else:
-            words.append(word)
-  wakati_text = " ".join(wakati_text)
-  return words, wakati_text
 
-import requests
-
-# ストップワードを取得
-def get_stop_words(lang="jp"):
-    if lang=="jp":
-        url = "http://svn.sourceforge.jp/svnroot/slothlib/CSharp/Version1/SlothLib/NLP/Filter/StopWord/word/Japanese.txt"
-    elif lang=="en":
-        url = "https://gist.githubusercontent.com/sebleier/554280/raw/7e0e4a1ce04c2bb7bd41089c9821dbcf6d0c786c/NLTK's%2520list%2520of%2520english%2520stopwords"
-    else:
-        raise
-    r = requests.get(url)
-    tmp = r.text.split('\r\n')
-    if lang=="jp":
-        stopwords = []
-        for i in range(len(tmp)):
-            if len(tmp[i]) < 1:
-                continue
-            stopwords.append(tmp[i])
-        stopwords += ["０","１","２","３","４","５","６","７","８","９"]
-    else:
-        stopwords = tmp[0].split('\n')
-    return stopwords
+# import requests
 
 def get_topic_number(corpus, lda_model):
   topics_number = []
@@ -129,7 +89,7 @@ def serialize_dates(obj):
     else:
         return obj
 
-def load_text_ja():
+def load_text_ja(calc_ppl=False):
     # input_dir_path = "/scratch/ace14333cp/ja_llm/llm-jp-corpus/data/cc/ja_cc/raw"
     #dataset = "/scratch/ace14333cp/ja_llm/classifier/data/evaluate/mc4-ja_token-num/dir1/0000_mc4-ja_token-num.jsonl"
     target_ppls = [660, 4120, 57000, float('inf')]
@@ -152,11 +112,12 @@ def load_text_ja():
             text = data["text"]
             if text != "":
                 try:
-                    words, wakati_text = analyzer(text)
-                    texts.append(words)
-                    ppl = cal_ppl(wakati_text)
+                    texts.append(text)
+                    if calc_ppl:
+                        words, wakati_text = analyzer(text)
+                        ppl = cal_ppl(wakati_text)
+                        data["ppl"] = ppl
                     count += 1
-                    data["ppl"] = ppl
                     new_dataset.append(data)
                 except:
                     pass
@@ -171,29 +132,92 @@ def load_text_ja():
 def load_text_en():
     path = "corpus/en_pile_merge_1.200k.jsonl"
     dataset = read_cc(path)
-    texts = [d['text'].lower().split() for d in dataset]
+    texts = [d['text'] for d in dataset]
     # import ipdb; ipdb.set_trace()
     print("texts:", len(texts))
     return texts, dataset
 
 class Tokenizer:
-    def __init__(self,lang):
-        self.stop_word = get_stop_words(lang)
+    def __init__(self,lang:str):
+        self.stop_word = self.get_stop_words(lang)
         self.lang = lang
-        self. en = re.compile('[a-z]+')
-    def __call__(self, text):
+        self.en = re.compile(r'[a-zA-Z]+')
+        self.jp = re.compile(r'[ぁ-んァ-ン一-龥]+')
+        self.jpsplit = re.compile(r'[。\n！？]')
+    def __call__(self, text:str):
         if self.lang == "jp":
-            words, wakati = analyzer(text)
-            return [w.lower() for w in words if (w.lower() not in self.stop_word) and not(self.en.fullmatch(w.lower()))]
+            words = self.sudachi(text)
+            return [w for w in words if w not in self.stop_word and self.jp.fullmatch(w)]
         elif self.lang == "en":
-            return [w.lower() for w in text.split() if (w.lower() not in self.stop_word)]
+            return [w.lower() for w in text.split() if w.lower() not in self.stop_word and self.en.fullmatch(w)]
         else:
             raise ValueError("lang must be 'jp' or 'en'")
+    def sudachi(self,text):
+        s=text
+        if len(s)>15000:
+            # print(f"too long sentence of {len(s)}:",s)
+            s=s[:15000]
+        ms = sudachi_tokenizer.tokenize(s)
+        words = [m.surface() for m in ms]
+        return words
+    def sudachi_(self,text):
+        words = []
+        for s in self.jpsplit.split(text):
+            # for s in t.split("。"):
+            if len(s)>10000:
+                print(f"too long sentence of {len(s)}:",s)
+                s=s[:10000]
+            ms = sudachi_tokenizer.tokenize(s)
+            words += [m.surface() for m in ms]
+        return words
+    def sudachi_wakachi(self,text):
+        words = []
+        wakati_text = []
+        for t in text.split("\n"):
+            for s in t.split("。"):
+                if len(s)>10000:   # this is extremely rare for Japanese sentences
+                    print(f"too long sentence of {len(s)}:",s)
+                    s=s[:10000]
+                ms = sudachi_tokenizer.tokenize(s)
+                for m in ms:
+                    word = m.surface()
+                    wakati_text.append(word)
+                    if m.part_of_speech()[0] == "名詞":
+                        if num.fullmatch(word):
+                            words.append("0")
+                        elif symbol.fullmatch(word) or alpha.fullmatch(word):
+                            pass
+                        else:
+                            words.append(word)
+        wakati_text = " ".join(wakati_text)
+        return words, wakati_text
+
+    def get_stop_words(self,lang):
+    # if lang=="jp":
+    #     url = "http://svn.sourceforge.jp/svnroot/slothlib/CSharp/Version1/SlothLib/NLP/Filter/StopWord/word/Japanese.txt"
+    # elif lang=="en":
+    #     url = "https://gist.githubusercontent.com/sebleier/554280/raw/7e0e4a1ce04c2bb7bd41089c9821dbcf6d0c786c/NLTK's%2520list%2520of%2520english%2520stopwords"
+    # else:
+    #     raise
+    # r = requests.get(url)
+    # tmp = r.text.split('\r\n')
+        stopwords = open(f"stopwords/{lang}.txt", "r").readlines()
+        stopwords = [s.strip() for s in stopwords]
+        if lang=="jp":
+            # stopwords = []
+            # for i in range(len(tmp)):
+            #     if len(tmp[i]) < 1:
+            #         continue
+            #     stopwords.append(tmp[i])
+            stopwords += ["０","１","２","３","４","５","６","７","８","９"]
+        # else:
+        #     stopwords = tmp[0].split('\n')
+        return stopwords
 
 # 最初からトピックモデル学習
 def train_topic_model(work_dir, texts, new_dataset, lang="jp", num_topics=17):
     tokenizer = Tokenizer(lang)
-    texts = [tokenizer(p) for p in texts]
+    texts = [tokenizer(p) for p in tqdm(texts, desc="Tokenizing")]
     
     #save texts
     with open(f"{work_dir}/topic_texts.jsonl", "w") as f:
@@ -215,6 +239,7 @@ def train_topic_model(work_dir, texts, new_dataset, lang="jp", num_topics=17):
     vis_pcoa = pyLDAvis.gensim.prepare(lda_model, corpus, dictionary, sort_topics=False)
     lda_model.save(f'{work_dir}/lda_100k.model')
     pyLDAvis.save_html(vis_pcoa, f'{work_dir}/pyldavis_lda_100k.html')
+    print("saved lda model")
 
 # 辞書からトピックモデル学習
 def middle(work_dir):
@@ -241,28 +266,21 @@ def middle(work_dir):
 
 # 推論
 def cal_topic_number(work_dir,file, lang="jp"):
+    tokenizer = Tokenizer(lang)
     # file = f"{work_dir}/topic_texts.jsonl"
     texts = []
     dataset = []
-    if lang == "jp":
-        with open(file, "r") as f:
-            for line in f:
-                data = json.loads(line)
-                dataset.append(data)
-                texts.append(data["nouns"])
-    elif lang == "en":
-        with open(file, "r") as f:
-            for line in f:
-                data = json.loads(line)
-                dataset.append(data)
-                texts.append(data["text"].lower().split())
-    else:
-        raise ValueError("lang must be 'jp' or 'en'")
-    dictionary = gensim.corpora.Dictionary(texts)
+    with open(file, "r") as f:
+        for line in tqdm(f):
+            data = json.loads(line)
+            dataset.append(data)
+            texts.append(tokenizer(data["text"]))
+    # dictionary = gensim.corpora.Dictionary(texts)
     # dictionary.save_as_text(f"{work_dir}/dictionary.txt")
-    dictionary.filter_extremes(no_below=3, no_above=0.3)
+    # dictionary.filter_extremes(no_below=3, no_above=0.3)
+    dictionary = gensim.corpora.Dictionary.load(f"{work_dir}/dictionary.filtered.pkl")
+    # import ipdb; ipdb.set_trace()
     corpus = [dictionary.doc2bow(t) for t in texts]
-    print("created corpus!")
     topics_number = []
     lda_model = gensim.models.ldamodel.LdaModel.load(f"{work_dir}/lda_100k.model")
     for topics_per_document in lda_model[corpus]:
@@ -287,14 +305,11 @@ def main(lang, num_topics=17):
 
     if lang=="jp":
         texts, new_dataset = load_text_ja()
-        train_topic_model(work_dir, texts, new_dataset, lang='jp', num_topics=17)
+        train_topic_model(work_dir, texts, new_dataset, lang='jp', num_topics=num_topics)
         cal_topic_number (work_dir, "corpus/CC-MAIN.txt", lang="jp")
-    # texts, new_dataset = load_text_ja()
-    # train_topic_model(work_dir, texts, new_dataset, lang='jp', num_topics=17)
-    # cal_topic_number (work_dir)
     elif lang=="en":
         texts, new_dataset = load_text_en()
-        train_topic_model(work_dir, texts, new_dataset, lang='en', num_topics=17)
+        train_topic_model(work_dir, texts, new_dataset, lang='en', num_topics=num_topics)
         cal_topic_number (work_dir, "corpus/en_pile_merge_2.200k.jsonl", lang="en")
 
 if __name__ == "__main__":

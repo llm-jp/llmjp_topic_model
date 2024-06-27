@@ -23,6 +23,8 @@ def split_topic_data(json_path):
                 json.dump(text_entry, f, ensure_ascii=False)
                 f.write('\n')
 
-if __name__ == "__main__":
-    work_dir='output7'
+def main(work_dir):
     split_topic_data(f"{work_dir}/topic_ana_100k.jsonl")
+
+if __name__ == "__main__":
+    fire.Fire(main)
